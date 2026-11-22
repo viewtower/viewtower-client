@@ -19,7 +19,9 @@ export function summarizeInput(toolInputJson: string | null): string {
     if (typeof input.command === "string") return input.command;
     if (typeof input.file_path === "string") return input.file_path;
     if (typeof input.notebook_path === "string") return input.notebook_path;
-    if (typeof input.pattern === "string") return input.pattern;
+    // Grep/Glob: rules match the searched folder, so show it above the pattern.
+    if (typeof input.pattern === "string")
+      return typeof input.path === "string" && input.path.trim() ? `Path: ${input.path}\nArg: ${input.pattern}` : input.pattern;
     if (typeof input.url === "string") return input.url;
     if (typeof input.query === "string") return input.query;
     if (typeof input.description === "string") return input.description;

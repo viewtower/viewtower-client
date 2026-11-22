@@ -1,36 +1,81 @@
 // Entry point: navigation, sidebar, live stream, startup.
-import { $, $$, api, guard, state, toast, token } from "./core.js";
-import { fmtTok, pct } from "./format.js";
-import { loadActivity, renderCalls, renderProjectOptions, setPrompts, upsertCalls } from "./activity.js";
+import { $, $$, api, esc, guard, state, toast, token } from "./core.js";
+import { fmtTime, fmtTok, LOCKED_HINT, pct } from "./format.js";
+import { loadActivity, projectLabel, renderCalls, renderProjectOptions, setPrompts, upsertCalls } from "./activity.js";
 import { loadStrategies } from "./savings.js";
 import { loadRules } from "./rules.js";
 
 // ---------- navigation ----------
-const PAGES = ["calls", "rules", "savings"];
+const PAGES = ["calls", "rules", "savings", "settings"];
 function showPage(page) {
-  if (!PAGES.includes(page)) page = "calls";
+  if (!PAGES.includes(page) || (page === "savings" && !featureOn("tokenSavings"))) page = "calls";
   state.page = page;
   $$("[data-page-section]").forEach((s) => (s.hidden = s.id !== `page-${page}`));
   $$("nav.menu a").forEach((a) => a.classList.toggle("active", a.dataset.page === page));
+  // Settings has no menu item: it opens from the environment menu.
+  $("#crumb").textContent = $(`nav.menu a[data-page="${page}"] .lbl`)?.textContent ?? "Settings";
+  setEnvMenu(false);
   if (page === "rules") guard(loadRules)();
   if (page === "savings") guard(loadStrategies)();
+  if (page === "settings") guard(loadStacks)();
 }
 window.addEventListener("hashchange", () => showPage(location.hash.slice(1)));
 
+// The top bar's button hides and shows the sidebar; the choice is kept in this browser.
+function setSidebar(open) {
+  $("#app").classList.toggle("nav-collapsed", !open);
+  $("#nav-toggle").setAttribute("aria-expanded", String(open));
+  try {
+    localStorage.setItem("sidebar", open ? "open" : "closed");
+  } catch {
+    // Storage blocked: the sidebar just opens again next time.
+  }
+}
+$("#nav-toggle").addEventListener("click", () => setSidebar($("#app").classList.contains("nav-collapsed")));
+try {
+  if (localStorage.getItem("sidebar") === "closed") setSidebar(false);
+} catch {
+  // Storage blocked: keep it open.
+}
+
 // ---------- sidebar / stats ----------
+/** Whether a feature is on; all are on until the stats say otherwise. */
+const featureOn = (f) => state.stats?.features?.[f] !== false;
+
 function renderStats() {
   const s = state.stats;
   if (!s) return;
-  $$("#modes button").forEach((b) => {
+  // The sidebar widget and the settings page both show the mode.
+  $$("#modes button, #set-mode button").forEach((b) => {
     b.classList.toggle("on", b.dataset.mode === s.mode);
     b.setAttribute("aria-pressed", String(b.dataset.mode === s.mode));
+    b.disabled = !!s.modeLocked;
+    // Keep the button's own tooltip to restore after a lock.
+    b.dataset.title ??= b.title;
+    b.title = s.modeLocked ? "Set by your company" : b.dataset.title;
   });
-  // Optional hint line under the modes. "off" has no button here; it can only be set with the CLI.
-  const hint = $("#mode-hint");
-  if (hint) {
-    const active = $(`#modes button[data-mode="${s.mode}"]`);
-    hint.textContent = active ? active.dataset.hint : "Checks are off (set with the CLI). Pick a mode to turn them on.";
-  }
+  // Features: the settings page's switches; token savings off hides its page, menu item and stat card.
+  $$("#page-settings [data-feature]").forEach((input) => (input.checked = featureOn(input.dataset.feature)));
+  // Traces and pipelines come from the company when logged in; token savings stay the developer's choice.
+  const traces = $('#page-settings [data-feature="traces"]');
+  traces.disabled = !!s.rulesLocked;
+  traces.closest(".setting").classList.toggle("disabled", traces.disabled);
+  traces.closest(".setting").title = traces.disabled ? LOCKED_HINT : "";
+  const pipelines = $('#page-settings [data-feature="pipelines"]');
+  pipelines.disabled = !!s.rulesLocked || !featureOn("traces");
+  pipelines.closest(".setting").classList.toggle("disabled", pipelines.disabled);
+  pipelines.closest(".setting").title = s.rulesLocked
+    ? LOCKED_HINT
+    : pipelines.disabled
+      ? "Needs trace files: the report is set up with a project's first one."
+      : "";
+  const savings = featureOn("tokenSavings");
+  $('nav.menu a[data-page="savings"]').hidden = !savings;
+  $(".stat-saved").hidden = !savings;
+  if (!savings && state.page === "savings") location.hash = "calls";
+  // "Set by your company" lines on the settings page. The sidebar mode switch only shows while the developer may choose.
+  $$("[data-mode-lock]").forEach((el) => (el.hidden = !s.modeLocked));
+  $("#side-mode").hidden = !!s.modeLocked;
   // Two stat cards, for all projects: "saved 11k of 74k", and denied calls.
   const t = s.tokens || {};
   const share = pct(t.savedTokens, t.resultTokens);
@@ -40,15 +85,18 @@ function renderStats() {
   $("#st-meter").style.width = `${Math.min(share, 100)}%`;
 }
 
-$$("#modes button").forEach((b) =>
+$$("#modes button, #set-mode button").forEach((b) =>
   b.addEventListener(
     "click",
     guard(async () => {
       if (b.dataset.mode === state.stats?.mode) return;
       if (
-        b.dataset.mode === "enforce" &&
-        !confirm("Switch to Enforce? Denied and unlisted tool calls will be denied in every connected agent session.")
+        b.dataset.mode === "monitor" &&
+        state.stats?.mode === "enforce" &&
+        !confirm("Switch to Monitor? You are disabling rules enforcement: your agent will be allowed to run denied commands.")
       )
+        return;
+      if (b.dataset.mode === "off" && !confirm("Turn rules enforcement off? Tool calls are no longer checked against the rules."))
         return;
       await api("PUT", "/api/mode", { mode: b.dataset.mode });
       state.stats.mode = b.dataset.mode;
@@ -56,6 +104,86 @@ $$("#modes button").forEach((b) =>
       toast(`Mode set to ${b.dataset.mode}`);
     })
   )
+);
+
+// ---------- environment menu: where settings come from (local for now), and the way to Settings ----------
+function setEnvMenu(open) {
+  $("#env-menu").hidden = !open;
+  $("#env").setAttribute("aria-expanded", String(open));
+}
+$("#env").addEventListener("click", () => setEnvMenu($("#env-menu").hidden));
+document.addEventListener("click", (e) => {
+  if (!$("#env-menu").hidden && !e.composedPath().includes($(".env-wrap"))) setEnvMenu(false);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("#env-menu").hidden) {
+    setEnvMenu(false);
+    $("#env").focus();
+  }
+});
+/** Signed in: the environment button and menu show the company login instead of "Local environment". Read-only. */
+function renderEnv(c) {
+  if (!c?.managed) return;
+  const synced = c.lastSync ? `synced ${fmtTime(c.lastSync)}` : "not synced yet";
+  $("#env-name").textContent = $("#env-name").title = c.email ?? "Signed in";
+  $("#env-sub").textContent = "Company workspace";
+  $("#env-menu-name").textContent = $("#env-menu-name").title = c.email ?? "Signed in";
+  $("#env-menu-sub").textContent =
+    `Rules and company settings come from your company${c.version !== null ? ` (rules v${c.version}, ${synced})` : ` (${synced})`}.`;
+}
+
+// ---------- settings page ----------
+async function loadStacks() {
+  const { stacks } = await api("GET", "/api/stacks");
+  $("#stacks").innerHTML = stacks.length
+    ? stacks
+        .map((s) => `<label><input type="checkbox" data-stack="${esc(s.name)}" ${s.on ? "checked" : ""} />${esc(s.name)}</label>`)
+        .join("")
+    : '<span class="muted">No rule names a tech stack.</span>';
+}
+$("#stacks").addEventListener(
+  "change",
+  guard(async (e) => {
+    const input = e.target;
+    try {
+      await api("PUT", "/api/stacks", { name: input.dataset.stack, on: input.checked });
+      toast(`${input.dataset.stack} ${input.checked ? "on" : "off"}`);
+    } catch (err) {
+      input.checked = !input.checked; // back to the stored state
+      throw err;
+    }
+  })
+);
+const FEATURE_NAMES = { tokenSavings: "Token savings", traces: "Trace files", pipelines: "Git pipeline report" };
+$$("#page-settings [data-feature]").forEach((input) =>
+  input.addEventListener(
+    "change",
+    guard(async () => {
+      try {
+        const { features } = await api("PUT", "/api/features", { feature: input.dataset.feature, on: input.checked });
+        state.stats.features = features;
+        toast(`${FEATURE_NAMES[input.dataset.feature]} ${input.checked ? "on" : "off"}`);
+      } finally {
+        renderStats(); // on failure: back to the stored state
+      }
+    })
+  )
+);
+
+// Manual pipeline setup, for one of the projects the gateway knows.
+function renderPipelineProjects() {
+  $("#pipeline-project").innerHTML = state.projects
+    .map((x) => `<option value="${esc(x.project)}" title="${esc(x.project)}">${esc(projectLabel(x.project))}</option>`)
+    .join("");
+  $("#pipeline-project").value = state.project || state.projects[0]?.project || "";
+  $("#pipeline-run").disabled = !state.projects.length;
+}
+$("#pipeline-run").addEventListener(
+  "click",
+  guard(async () => {
+    const { setUp } = await api("POST", "/api/pipelines", { project: $("#pipeline-project").value });
+    toast(setUp.length ? `Pipeline report set up for ${setUp.join(" and ")}` : "No GitHub or GitLab CI found in this repository");
+  })
 );
 
 // ---------- live stream ----------
@@ -81,16 +209,18 @@ function connect() {
 
 if (!token) {
   $("#banner").innerHTML =
-    '<div class="banner error">Missing access token. Open the URL printed by <code>apichap-gateway dashboard</code> in your terminal.</div>';
+    '<div class="banner error">Not connected yet. Run <code>npx viewtower dashboard</code> once in your terminal to connect this browser.</div>';
 } else {
   // Stream first, then history: anything arriving in between is merged by id.
   connect();
   guard(async () => {
     state.stats = await api("GET", "/api/stats");
     renderStats();
+    renderEnv(await api("GET", "/api/company"));
     showPage(location.hash.slice(1) || "calls");
     state.projects = await api("GET", "/api/projects");
     renderProjectOptions();
+    renderPipelineProjects();
     await loadActivity();
   })();
 }

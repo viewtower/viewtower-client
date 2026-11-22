@@ -1,18 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // End to end: run the real hook command with JSON on stdin, as Claude Code does.
-const dir = mkdtempSync(join(tmpdir(), "apichap-hooks-"));
+const dir = mkdtempSync(join(tmpdir(), "viewtower-hooks-"));
 const cli = join(__dirname, "..", "src", "main.ts");
 
 function hook(phase: string, input: unknown): Record<string, unknown> {
   const r = spawnSync(process.execPath, ["--import", "tsx", cli, "hook", phase, "--agent", "claude"], {
     input: JSON.stringify(input),
-    env: { ...process.env, APICHAP_GATEWAY_DIR: dir, APICHAP_GATEWAY_MODE: "enforce" },
+    env: { ...process.env, VIEWTOWER_GATEWAY_DIR: dir, VIEWTOWER_GATEWAY_MODE: "enforce" },
     encoding: "utf8",
   });
   assert.equal(r.status, 0, r.stderr);
@@ -49,6 +49,45 @@ test("PostToolUse leaves small, clean results alone", () => {
     tool_response: { stdout: "/home/me", stderr: "", interrupted: false, isImage: false },
   });
   assert.deepEqual(out, {});
+});
+
+test("PostToolUse traces what the agent wrote into the project's .viewtower folder", () => {
+  const project = mkdtempSync(join(tmpdir(), "viewtower-hooks-project-"));
+  hook("post", {
+    ...base,
+    cwd: project,
+    hook_event_name: "PostToolUse",
+    tool_name: "Edit",
+    tool_use_id: "tu-trace",
+    tool_input: { file_path: join(project, "a.ts"), old_string: "let x = 1;", new_string: "let x = 2;" },
+    tool_response: {},
+  });
+  const traces = join(project, ".viewtower", "traces");
+  const [file] = readdirSync(traces);
+  assert.match(file, /_s1\.jsonl$/);
+  const [session, change] = readFileSync(join(traces, file), "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l));
+  assert.equal(session.kind, "session");
+  assert.deepEqual([change.tool, change.path, change.seg.length], ["Edit", "a.ts", 1]);
+});
+
+test("PostToolUseFailure completes the call with its tokens, without replacing the output", () => {
+  const call = { ...base, tool_name: "Bash", tool_use_id: "tu-fail", tool_input: { command: "npm test" } };
+  hook("pre", { ...call, hook_event_name: "PreToolUse" });
+  const error = "Exit code 1\n" + Array.from({ length: 200 }, (_, i) => `ok ${i + 1} - test ${i}`).join("\n");
+  assert.deepEqual(hook("post", { ...call, hook_event_name: "PostToolUseFailure", error, is_interrupt: false }), {});
+
+  const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+  const db = new DatabaseSync(join(dir, "gateway.sqlite"));
+  const row = db
+    .prepare("SELECT completed_at, result_tokens, result_tokens_after FROM tool_calls WHERE tool_use_id = ?")
+    .get("tu-fail")!;
+  db.close();
+  assert.ok(row.completed_at);
+  assert.ok(Number(row.result_tokens) > 0);
+  assert.equal(row.result_tokens_after, row.result_tokens);
 });
 
 test("PreToolUse still denies by rule in enforce mode", () => {

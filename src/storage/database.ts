@@ -1,5 +1,5 @@
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { MIGRATIONS } from "./migrations";
@@ -7,8 +7,8 @@ import { MIGRATIONS } from "./migrations";
 // The SQLite connection. Tables and their queries live in storage/tables/, one file per table;
 // the schema is created and changed only by the numbered migrations in storage/migrations/.
 
-/** APICHAP_GATEWAY_DIR relocates all gateway data (used by tests; handy for trying things out). */
-export const GATEWAY_DIR = process.env.APICHAP_GATEWAY_DIR || join(homedir(), ".ai-coding-gateway");
+/** VIEWTOWER_GATEWAY_DIR relocates all gateway data (used by tests; handy for trying things out). */
+export const GATEWAY_DIR = process.env.VIEWTOWER_GATEWAY_DIR || join(homedir(), ".viewtower");
 // A new file name for the migration-managed schema: databases from development builds (gateway.db)
 // are simply left alone, nothing has to be renamed or converted.
 export const DB_PATH = join(GATEWAY_DIR, "gateway.sqlite");
@@ -19,7 +19,8 @@ let transactionDepth = 0;
 
 export function getDb(): DatabaseSync {
   if (db) return db;
-  mkdirSync(GATEWAY_DIR, { recursive: true });
+  // Owner-only: the database holds the company login tokens (modes are ignored on Windows).
+  mkdirSync(GATEWAY_DIR, { recursive: true, mode: 0o700 });
   db = open();
   migrate(db);
   return db;
@@ -62,6 +63,7 @@ export function transaction<T>(fn: () => T): T {
 
 function open(): DatabaseSync {
   const database = new DatabaseSync(DB_PATH);
+  chmodSync(DB_PATH, 0o600); // SQLite gives its -wal/-shm files the same mode
   database.exec(`
     PRAGMA journal_mode = WAL;     -- the dashboard reads while hook processes write
     PRAGMA synchronous = NORMAL;   -- safe with WAL, much faster writes

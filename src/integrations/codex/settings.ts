@@ -12,14 +12,17 @@ export function installHooks(options: { path?: string } & shared.HookCommandOpti
     matcher: ".*",
     capturePrompts: true,
     statusMessages: {
-      PreToolUse: "apichap: Check tool permissions",
-      PostToolUse: "apichap: Record tool result",
-      PreCompact: "apichap: Reset context before compaction",
-      SessionStart: "apichap: Initialize session context",
-      UserPromptSubmit: "apichap: Capture user prompt",
+      PreToolUse: "viewtower: Check tool permissions",
+      PostToolUse: "viewtower: Record tool result",
+      PreCompact: "viewtower: Reset context before compaction",
+      SessionStart: "viewtower: Initialize session context",
+      UserPromptSubmit: "viewtower: Capture user prompt",
     },
   });
 }
 export function uninstallHooks(options: { path?: string } = {}) {
   return shared.uninstallHooks({ path: options.path ?? defaultSettingsPath() });
+}
+export function hooksInstalled(path?: string) {
+  return shared.hooksInstalled(path ?? defaultSettingsPath());
 }

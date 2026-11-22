@@ -60,12 +60,14 @@ export interface CallEnd extends CallIdentity {
 }
 
 const json = (value: unknown) => (value === undefined ? null : safeStringify(value));
+/** Logged out: no activity upload, so a call is born synced and a later login never sends it. */
+const SYNCED_IF_LOGGED_OUT = `NOT EXISTS (SELECT 1 FROM settings WHERE key = 'auth:refresh_token')`;
 
 export function insertCall(c: CallStart): void {
   sql(
     `INSERT INTO tool_calls (tool_use_id, session_id, agent_id, prompt_id, transcript_path, project, tool_name, tool_input,
-                             decision, rule_id, input_tokens, started_at, integration)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                             decision, rule_id, input_tokens, started_at, integration, synced)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${SYNCED_IF_LOGGED_OUT})`
   ).run(
     c.toolUseId,
     c.sessionId,
@@ -111,8 +113,8 @@ export function completeCall(c: CallEnd): void {
   sql(
     `INSERT INTO tool_calls (tool_use_id, session_id, agent_id, prompt_id, transcript_path, project, tool_name, tool_input,
                              decision, input_tokens, completed_at, duration_ms, tool_result, reduced_result, result_tokens,
-                             result_tokens_after, reduction, integration)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'observed', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                             result_tokens_after, reduction, integration, synced)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'observed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ${SYNCED_IF_LOGGED_OUT})`
   ).run(
     c.toolUseId,
     c.sessionId,

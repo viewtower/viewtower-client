@@ -6,6 +6,8 @@ import { dropMeasureMode } from "./005-drop-measure-mode";
 import { integration } from "./006-integration";
 import { prompts } from "./007-prompts";
 import { promptContext } from "./008-prompt-context";
+import { ruleTechStacks } from "./009-rule-tech-stacks";
+import { activitySynced } from "./010-activity-synced";
 import type { Migration } from "./types";
 
 /** All migrations, in order. Append new ones at the end; never reorder or edit released ones. */
@@ -18,4 +20,6 @@ export const MIGRATIONS: Migration[] = [
   integration,
   prompts,
   promptContext,
+  ruleTechStacks,
+  activitySynced,
 ];

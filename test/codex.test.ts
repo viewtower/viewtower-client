@@ -26,7 +26,7 @@ function hook(phase: string, input: unknown, mode = "enforce") {
     {
       input: JSON.stringify(input),
       encoding: "utf8",
-      env: { ...process.env, APICHAP_GATEWAY_DIR: dir, APICHAP_GATEWAY_MODE: mode },
+      env: { ...process.env, VIEWTOWER_GATEWAY_DIR: dir, VIEWTOWER_GATEWAY_MODE: mode },
     }
   );
   assert.equal(r.status, 0, r.stderr);
@@ -95,7 +95,7 @@ test("Codex session reset succeeds", () => {
   assert.deepEqual(hook("session", { session_id: "session", hook_event_name: "PreCompact" }), {});
 });
 
-test("defaults cover reported Codex web name and shared Bash pipelines while denying destructive commands", () => {
+test("defaults cover reported Codex web name and shared Bash pipelines while denying destructive cli", () => {
   const rules = parseRuleFile(loadDefaultRuleFile())
     .flatMap((g) => g.rules)
     .map((r, i) => ({ ...r, id: i + 1, note: r.note ?? null }));

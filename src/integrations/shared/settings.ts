@@ -4,7 +4,7 @@ import { packageFile } from "../../helpers/paths";
 
 // Shared JSON hook installer. Integrations supply their path and matcher syntax.
 
-const PACKAGE_NAME = "apichap-ai-coding-gateway";
+const PACKAGE_NAME = "viewtower";
 
 interface HookHandler {
   type?: string;
@@ -29,11 +29,14 @@ const PHASES = [
 ] as const;
 
 type Phase = (typeof PHASES)[number]["phase"] | "prompt";
-const ALL_PHASES = [...PHASES, { event: "UserPromptSubmit", phase: "prompt" as const }];
+const PROMPT_PHASE = { event: "UserPromptSubmit", phase: "prompt" as const };
+// Claude Code fires this instead of PostToolUse when a tool fails (e.g. a non-zero exit); without it the call stays "running".
+const FAILURE_PHASE = { event: "PostToolUseFailure", phase: "post" as const };
+const ALL_PHASES = [...PHASES, PROMPT_PHASE, FAILURE_PHASE];
 
-// Our own hook commands, including older forms (global bin, npx, running from a source checkout).
+// Package/installed commands, or the exact --local shape hookCommand writes (not any cli.js/main.js).
 const OUR_COMMAND =
-  /(apichap-ai-coding-gateway(@\S+)?|apichap-gateway|claude-gateway|[\\/](?:cli|main)\.[jt]s"?)\s+hook\s+(pre|post|session|prompt)\b/;
+  /(?:^|\s)viewtower(?:@\S+)?\s+hook\s+(?:pre|post|session|prompt)\b|^(?:npx tsx|node) "[^"]+\/(?:src\/main\.ts|dist\/main\.js)" hook (?:pre|post|session|prompt) --agent \S+$/;
 
 export function packageVersion(): string {
   try {
@@ -50,7 +53,7 @@ export function packageVersion(): string {
  */
 export interface HookCommandOptions {
   integration?: string;
-  /** Use the globally installed `apichap-gateway` command (fastest startup). */
+  /** Use the globally installed `viewtower` command (fastest startup). */
   installed?: boolean;
   /**
    * Run exactly this copy of the gateway, e.g. a local checkout: the path of its start file
@@ -65,7 +68,7 @@ export function hookCommand(phase: Phase, options: HookCommandOptions & { integr
     const entry = options.localEntry.replace(/\\/g, "/");
     return `${entry.endsWith(".ts") ? "npx tsx" : "node"} "${entry}" hook ${phase}${suffix}`;
   }
-  if (options.installed) return `apichap-gateway hook ${phase}${suffix}`;
+  if (options.installed) return `viewtower hook ${phase}${suffix}`;
   return `npx -y --prefer-offline ${PACKAGE_NAME}@${packageVersion()} hook ${phase}${suffix}`;
 }
 
@@ -125,6 +128,8 @@ export function installHooks(
     path: string;
     matcher?: string;
     capturePrompts?: boolean;
+    /** Also record failed tool calls (PostToolUseFailure; Claude Code only). */
+    recordFailures?: boolean;
     statusMessages?: Record<string, string>;
   } & HookCommandOptions & { integration: string }
 ): InstallResult {
@@ -133,7 +138,12 @@ export function installHooks(
   const replaced = removeOurHooks(settings);
   settings.hooks ??= {};
   const commands: string[] = [];
-  for (const { event, phase } of options.capturePrompts ? ALL_PHASES : PHASES) {
+  const phases = [
+    ...PHASES,
+    ...(options.capturePrompts ? [PROMPT_PHASE] : []),
+    ...(options.recordFailures ? [FAILURE_PHASE] : []),
+  ];
+  for (const { event, phase } of phases) {
     const command = hookCommand(phase, options);
     commands.push(command);
     const entries = settings.hooks[event] ?? [];
@@ -154,4 +164,23 @@ export function uninstallHooks(options: { path: string }): { path: string; backu
   const removed = removeOurHooks(settings);
   const backup = removed > 0 ? writeSettings(path, settings) : null;
   return { path, backup, removed };
+}
+
+/** True when every event in PHASES still has our hook handler (reported to the company server on sync). */
+export function hooksInstalled(path: string): boolean {
+  let settings: Settings;
+  try {
+    settings = readSettings(path);
+  } catch {
+    return false;
+  }
+  return PHASES.every(({ event }) => {
+    const entries = settings.hooks?.[event];
+    return (
+      Array.isArray(entries) &&
+      entries.some(
+        (e) => Array.isArray(e.hooks) && e.hooks.some((h) => typeof h.command === "string" && OUR_COMMAND.test(h.command))
+      )
+    );
+  });
 }

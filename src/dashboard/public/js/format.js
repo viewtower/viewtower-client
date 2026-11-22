@@ -28,7 +28,11 @@ export const decisionBadge = (d) =>
 
 // ---------- why a call was allowed or blocked ----------
 export const isBlocked = (c) => c.decision === "denied" || c.decision === "would_deny";
-const ALLOW_BUTTON = '<div><button class="btn sm primary" type="button" data-allow>Allow this call…</button></div>';
+/** Disables a control while the company manages the rules, with the reason as its tooltip. */
+export const lockedAttrs = () => (state.stats?.rulesLocked ? ` disabled title="${LOCKED_HINT}"` : "");
+export const LOCKED_HINT = "Managed by your company. Change it in the portal.";
+const allowButton = () =>
+  `<div><button class="btn sm primary" type="button" data-allow${lockedAttrs()}>Allow this call…</button></div>`;
 
 /** Plain-text reason, used as a tooltip. */
 export function reasonTitle(c) {
@@ -66,10 +70,10 @@ export function reasonLong(c) {
   if (r.kind === "rule") {
     return `<div class="reason-box deny"><div><b>${c.decision === "would_deny" ? "Denied" : "Denied"}${r.group ? `: ${esc(r.group)}` : ` by deny rule #${r.ruleId}`}</b></div>
       ${r.deleted ? '<div class="muted">This rule has been deleted since.</div>' : `<div>Deny rule #${r.ruleId} <code>${esc(r.rule)}</code>${r.note ? ` · ${esc(r.note)}` : ""}</div>`}
-      ${ALLOW_BUTTON}</div>`;
+      ${allowButton()}</div>`;
   }
   return `<div class="reason-box unlisted"><div><b>${c.decision === "would_deny" ? "Denied" : "Denied"}: no allow rule covers this call</b></div>
-    ${ALLOW_BUTTON}</div>`;
+    ${allowButton()}</div>`;
 }
 
 /** Result tokens of a call, with the reduction ("12.3k → 4.1k −66%"). */
@@ -104,10 +108,12 @@ export function callRow(c) {
           ? `${(c.durationMs / 1000).toFixed(1)}s`
           : "completed"
         : "running…";
+  // Grep/Glob summaries are "Path: …\nArg: …"; other summaries (multi-line shell commands) stay one line.
+  const lines = c.tool === "Grep" || c.tool === "Glob" ? c.summary.split("\n") : [c.summary];
   return `<tr data-id="${c.id}" class="${c._new ? "new" : ""}">
     <td class="time mono">${esc(fmtTime(c.startedAt || c.completedAt))}</td>
     <td class="tool" title="${esc(c.tool)}">${esc(toolLabel(c.tool))}${c.agentId ? ' <span class="pill" title="Called by a sub-agent">agent</span>' : ""}</td>
-    <td class="summary" title="${esc(c.summary)}">${c.description ? `<div class="call-desc">${esc(c.description)}</div>` : ""}<div class="call-cmd mono">${esc(c.summary)}</div></td>
+    <td class="summary" title="${esc(c.summary)}">${c.description ? `<div class="call-desc">${esc(c.description)}</div>` : ""}${lines.map((l) => `<div class="call-cmd mono">${esc(l)}</div>`).join("")}</td>
     <td>${tokenCell(c)}</td>
     <td title="${esc(reasonTitle(c))}">${decisionBadge(c.decision)}${reasonShort(c)}</td>
     <td class="status">${status}</td></tr>`;

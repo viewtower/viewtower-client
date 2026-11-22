@@ -1,13 +1,14 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request as httpRequest } from "node:http";
+import { createServer as createNetServer, type AddressInfo } from "node:net";
 
 // Point the gateway at a throwaway database before any gateway module is loaded.
-const dir = mkdtempSync(join(tmpdir(), "apichap-gateway-test-"));
-process.env.APICHAP_GATEWAY_DIR = dir;
+const dir = mkdtempSync(join(tmpdir(), "viewtower-test-"));
+process.env.VIEWTOWER_GATEWAY_DIR = dir;
 
 type ServerModule = typeof import("../src/dashboard/server");
 type StoreModule = typeof import("../src/services/settings") & typeof import("../src/services/tool-security/rules");
@@ -54,7 +55,7 @@ function logUnlisted(command: string, toolUseId: string): number {
 test("serves the page", async () => {
   const res = await fetch(base + "/");
   assert.equal(res.status, 200);
-  assert.match(await res.text(), /apichap AI Coding Gateway/);
+  assert.match(await res.text(), /<title>viewtower - /);
 });
 
 test("serves the page's stylesheet and modules with a strict CSP", async () => {
@@ -95,7 +96,7 @@ test("every element the page's scripts look up by id exists in index.html", () =
 });
 
 test("serves brand assets without a token, nothing else", async () => {
-  const logo = await fetch(base + "/assets/apichap-logo.png");
+  const logo = await fetch(base + "/assets/viewtower-logo.png");
   assert.equal(logo.status, 200);
   assert.equal(logo.headers.get("content-type"), "image/png");
   assert.equal((await fetch(base + "/assets/missing.png")).status, 404);
@@ -553,4 +554,105 @@ test("captured prompts without calls are visible, filterable and reachable by en
     await api("GET", `/api/prompts?project=${encodeURIComponent(join(dir, "prompt-only"))}`)
   ).json()) as unknown[];
   assert.equal(filtered.length, 2);
+});
+
+test("environment settings: features are on by default and can be switched off", async () => {
+  const stats = async () => (await (await api("GET", "/api/stats")).json()) as { features: Record<string, boolean> };
+  assert.deepEqual((await stats()).features, { traces: true, pipelines: true, tokenSavings: true });
+  const res = await api("PUT", "/api/features", { feature: "tokenSavings", on: false });
+  assert.equal(res.status, 200);
+  assert.deepEqual((await stats()).features, { traces: true, pipelines: true, tokenSavings: false });
+  assert.equal((await api("PUT", "/api/features", { feature: "nope", on: false })).status, 400);
+  assert.equal((await api("PUT", "/api/features", { feature: "traces", on: "no" })).status, 400);
+  await api("PUT", "/api/features", { feature: "tokenSavings", on: true });
+});
+
+test("environment settings: tech stacks are on by default and can be switched off", async () => {
+  const stacks = async () =>
+    ((await (await api("GET", "/api/stacks")).json()) as { stacks: Array<{ name: string; on: boolean }> }).stacks;
+  const all = await stacks();
+  assert.ok(all.every((s) => s.on && s.name !== "general"));
+  assert.equal((await api("PUT", "/api/stacks", { name: "nope", on: false })).status, 400);
+  const name = all[0].name;
+  assert.equal((await api("PUT", "/api/stacks", { name, on: false })).status, 200);
+  assert.equal((await stacks()).find((s) => s.name === name)?.on, false);
+  await api("PUT", "/api/stacks", { name, on: true });
+});
+
+test("environment settings: the gateway skips token savings, trace files and the CI report when they are off", async () => {
+  const { afterToolCall } = await import("../src/services/gateway");
+  const project = mkdtempSync(join(dir, "project-"));
+  mkdirSync(join(project, ".git"));
+  mkdirSync(join(project, ".github", "workflows"), { recursive: true });
+  const bash = { toolUseId: "red", toolName: "Bash", toolInput: { command: "ls" }, cwd: project, sessionId: "s-red" };
+  const colored = { response: { stdout: "\u001b[31mred\u001b[0m text\n".repeat(20), stderr: "", interrupted: false } };
+  const write = (n: number) => ({
+    toolUseId: `w${n}`,
+    toolName: "Write",
+    toolInput: { file_path: join(project, `a${n}.ts`), content: "export const a = 1;" },
+    cwd: project,
+    sessionId: "1a2b3c4d-0000-0000-0000-000000000000",
+  });
+  const workflow = join(project, ".github", "workflows", "viewtower-report.yml");
+
+  assert.ok(afterToolCall(bash, colored).updatedResponse, "on: the colors are removed");
+  store.setFeature("tokenSavings", false);
+  assert.equal(afterToolCall({ ...bash, toolUseId: "red2" }, colored).updatedResponse, undefined);
+
+  store.setFeature("traces", false);
+  afterToolCall(write(1), { response: {} });
+  assert.equal(existsSync(join(project, ".viewtower")), false);
+
+  // Traces on, pipelines off: the first trace file, but no CI report.
+  store.setFeature("traces", true);
+  store.setFeature("pipelines", false);
+  afterToolCall(write(2), { response: {} });
+  assert.equal(readdirSync(join(project, ".viewtower", "traces")).length, 1);
+  assert.equal(existsSync(workflow), false);
+
+  for (const f of ["traces", "pipelines", "tokenSavings"] as const) store.setFeature(f, true);
+});
+
+test("token is created once and reused", async () => {
+  const { startDashboard } = await import("../src/dashboard/server");
+  const { addSetting, getSetting } = await import("../src/storage/tables/settings");
+  const first = await startDashboard({ port: 0, pollMs: 1000 });
+  await first.close();
+  addSetting("dashboard:token", "late-writer"); // a racing start must not replace the stored token
+  assert.equal(getSetting("dashboard:token"), first.token);
+  const second = await startDashboard({ port: 0, pollMs: 1000 });
+  await second.close();
+  assert.equal(first.token, second.token);
+  assert.equal(first.token, getSetting("dashboard:token"));
+});
+
+test("POST /api/stop needs the token and calls onStop", async () => {
+  const { startDashboard } = await import("../src/dashboard/server");
+  let stopped = false;
+  const d = await startDashboard({ port: 0, token: "s", pollMs: 1000, onStop: () => (stopped = true) });
+  try {
+    const url = `http://127.0.0.1:${d.port}/api/stop`;
+    assert.equal((await fetch(url, { method: "POST" })).status, 401);
+    assert.equal(stopped, false);
+    assert.equal((await fetch(url, { method: "POST", headers: { "X-Gateway-Token": "s" } })).status, 200);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(stopped, true);
+  } finally {
+    await d.close();
+  }
+});
+
+test("busy port is an error", async () => {
+  const { startDashboard } = await import("../src/dashboard/server");
+  await assert.rejects(startDashboard({ port: dashboard.port, token: "x" }), { code: "EADDRINUSE" });
+});
+
+test("portInUse", async () => {
+  const { portInUse } = await import("../src/dashboard/autostart");
+  assert.equal(await portInUse(dashboard.port), true);
+  const probe = createNetServer();
+  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const closed = (probe.address() as AddressInfo).port;
+  await new Promise((resolve) => probe.close(resolve));
+  assert.equal(await portInUse(closed), false);
 });

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "apichap AI Coding Gateway rule file",
+  "name": "viewtower.ai AI-Coding Governance default rules",
   "description": "Rule groups for Claude Code tool calls. Each group is one policy in plain words (\"The agent is not allowed to delete files\") with the allow and deny rules that implement it. A matching deny rule always wins; calls no allow rule covers are denied too.",
   "type": "object",
   "properties": {
@@ -82,7 +82,13 @@
           "type": ["string", "null"],
           "description": "Optional detail for this one rule. When a deny rule blocks a call, Claude sees the group title and this note."
         },
-        "enabled": { "type": "boolean", "default": true, "description": "Set to false to keep the rule but switch it off." }
+        "enabled": { "type": "boolean", "default": true, "description": "Set to false to keep the rule but switch it off." },
+        "techStacks": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Tech stacks the rule is for, e.g. [\"npm\"]. \"general\" or no list means all. Allow rules of stacks switched off in the dashboard are ignored; a rule with several stacks stays active while any one of them is on. Deny rules always apply.",
+          "examples": [["general"], ["npm"], ["java", "maven"]]
+        }
       }
     }
   }

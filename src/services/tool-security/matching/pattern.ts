@@ -28,7 +28,7 @@ export type SubjectKind = "command" | "path" | "url";
 export interface Subject {
   kind: SubjectKind;
   value: string;
-  /** Case-insensitive matching (PowerShell commands, Windows paths). */
+  /** Case-insensitive matching (PowerShell cli, Windows paths). */
   caseInsensitive: boolean;
   shell?: "bash" | "powershell";
 }
@@ -135,10 +135,16 @@ export const TOOL_GROUPS: Record<string, string[]> = {
   File: ["Read", "Grep", "Glob", "view_image", "Edit", "Write", "MultiEdit", "NotebookEdit"],
 };
 
+/** Tool names in rules are case-insensitive: READ(x) and fileread(x) must not silently match nothing. */
+function toolGroup(name: string): string[] | undefined {
+  const key = Object.keys(TOOL_GROUPS).find((k) => k.toLowerCase() === name.toLowerCase());
+  return key ? TOOL_GROUPS[key] : undefined;
+}
+
 export function toolMatches(rule: ParsedRule, toolName: string): boolean {
-  const group = TOOL_GROUPS[rule.tool];
+  const group = toolGroup(rule.tool);
   if (group) return group.includes(toolName);
-  return globToRegex(rule.tool, "tool", false).test(toolName);
+  return globToRegex(rule.tool, "tool", true).test(toolName);
 }
 
 /**
@@ -163,7 +169,7 @@ export function ruleMatches(
 export function callFromRuleSyntax(text: string): { toolName: string; toolInput: Record<string, string> } {
   const parsed = parseRule(text);
   // A group stands for its first tool: Shell(x) is tested as Bash(x), File(x) as Read(x).
-  const tool = TOOL_GROUPS[parsed.tool]?.[0] ?? parsed.tool;
+  const tool = toolGroup(parsed.tool)?.[0] ?? parsed.tool;
   const pattern = parsed.pattern;
   if (pattern === null) return { toolName: tool, toolInput: {} };
   if (tool === "Bash" || tool === "PowerShell") return { toolName: tool, toolInput: { command: pattern } };

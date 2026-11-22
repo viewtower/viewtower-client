@@ -2,7 +2,6 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
 import {
   countDeniedCalls,
   getCall,
@@ -36,14 +35,31 @@ import {
 } from "../services/tool-security/rule-files/rule-sets";
 import type { Verdict } from "../services/tool-security/matching/engine";
 import { parseJsonOrText } from "../helpers/json";
-import { MODES, getMode, setMode, type Mode } from "../services/settings";
+import {
+  FEATURES,
+  MODES,
+  disabledStacks,
+  features,
+  companyMode,
+  effectiveMode,
+  setFeature,
+  setMode,
+  setStackEnabled,
+  type Feature,
+  type Mode,
+} from "../services/settings";
 import { allowCall, allowOptions, type CallRef } from "../services/tool-security/allow-call";
+import { setUpPipelines } from "../services/pipeline/pipelines";
+import { managed } from "../services/company/session";
+import { maybeUploadActivity } from "../services/company/sync";
+import { addSetting, getSetting } from "../storage/tables/settings";
 import {
   addGroup,
   addRule,
   evaluateCall,
   listGroups,
   listRules,
+  listStacks,
   moveRule,
   removeGroup,
   removeRule,
@@ -51,15 +67,15 @@ import {
   updateGroup,
 } from "../services/tool-security/rules";
 
-// Local-only dashboard. It can change policy, so every API call needs the per-run token
+// Local-only dashboard. It can change policy, so every API call needs the per-machine token
 // (blocks other websites from calling it) and a localhost Host header (blocks DNS rebinding).
 
 export interface DashboardOptions {
   port: number;
-  /** Try the next ports if `port` is taken. */
-  portFallback?: boolean;
   token?: string;
   pollMs?: number;
+  /** Called by POST /api/stop (`dashboard --stop`); the CLI closes the server and exits. */
+  onStop?: () => void;
 }
 
 export interface Dashboard {
@@ -179,10 +195,14 @@ function toVerdict(v: Verdict) {
 
 function stats() {
   return {
-    mode: getMode(),
+    mode: effectiveMode(),
+    features: features(),
     activeRules: countEnabledRules(),
     deniedCalls: countDeniedCalls(),
     tokens: tokenTotals(),
+    modeLocked: companyMode() !== undefined,
+    // Logged in: rules, rule groups and the company features can't be changed here (the API refuses).
+    rulesLocked: managed(),
   };
 }
 
@@ -251,25 +271,14 @@ function staticFile(pathname: string): { type: string; body: Buffer } | null {
   return { type: CONTENT_TYPES[rel.slice(rel.lastIndexOf("."))], body: readFileSync(file) };
 }
 
-export function openBrowser(url: string): void {
-  try {
-    // Not explorer.exe: it opens the Documents folder instead of the browser for URLs with a query string.
-    const [cmd, args] =
-      process.platform === "win32"
-        ? ["rundll32.exe", ["url.dll,FileProtocolHandler", url]]
-        : process.platform === "darwin"
-          ? ["open", [url]]
-          : ["xdg-open", [url]];
-    const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
-    child.on("error", () => {});
-    child.unref();
-  } catch {
-    // Not fatal: the URL is printed as well.
-  }
-}
-
 export async function startDashboard(options: DashboardOptions): Promise<Dashboard> {
-  const token = options.token ?? randomBytes(18).toString("base64url");
+  // One token per machine, so the browser can remember it.
+  let token = options.token ?? getSetting("dashboard:token");
+  if (!token) {
+    // Insert-if-missing then re-read: two first starts at once agree on one token.
+    addSetting("dashboard:token", randomBytes(18).toString("base64url"));
+    token = getSetting("dashboard:token") as string;
+  }
   let port = options.port;
 
   // ---------- live feed: one poller for all SSE clients ----------
@@ -324,6 +333,33 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     const method = req.method ?? "GET";
     const path = url.pathname;
     let m: RegExpMatchArray | null;
+
+    // Logged in: rules and features come from the company and can't be changed here (testing a call still works).
+    if (
+      managed() &&
+      method !== "GET" &&
+      method !== "HEAD" &&
+      /^\/api\/(rules|rule-groups|calls\/\d+\/allow)/.test(path) &&
+      path !== "/api/rules/test"
+    )
+      throw new HttpError(403, "Rules are managed by your company.");
+
+    if (method === "POST" && path === "/api/stop") {
+      sendJson(res, 200, { ok: true });
+      setImmediate(() => options.onStop?.());
+      return;
+    }
+
+    if (method === "GET" && path === "/api/company") {
+      const config = getSetting("company:config");
+      return sendJson(res, 200, {
+        managed: managed(),
+        email: getSetting("auth:email") ?? null,
+        version: getSetting("company:version") ? Number(getSetting("company:version")) : null,
+        lastSync: getSetting("company:last_sync") ? Number(getSetting("company:last_sync")) : null,
+        config: config ? JSON.parse(config) : null,
+      });
+    }
 
     if (method === "GET" && path === "/api/stream") {
       res.writeHead(200, {
@@ -401,7 +437,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
       const date = new Date().toISOString().slice(0, 10);
       res.writeHead(200, {
         "Content-Type": "application/json; charset=utf-8",
-        "Content-Disposition": `attachment; filename="apichap-gateway-rules-${date}.json"`,
+        "Content-Disposition": `attachment; filename="viewtower-rules-${date}.json"`,
         "Cache-Control": "no-store",
       });
       res.end(formatRuleFile(exportRules()));
@@ -484,13 +520,45 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     }
 
     if (path === "/api/mode") {
-      if (method === "GET") return sendJson(res, 200, { mode: getMode() });
+      if (method === "GET") return sendJson(res, 200, { mode: effectiveMode() });
       if (method === "PUT") {
+        if (companyMode()) throw new HttpError(403, "Mode is managed by your company.");
         const body = await readBody(req);
         if (!MODES.includes(body.mode as Mode)) throw new HttpError(400, `mode must be one of ${MODES.join(", ")}`);
         setMode(body.mode as Mode);
         return sendJson(res, 200, { mode: body.mode });
       }
+    }
+
+    if (path === "/api/features" && method === "PUT") {
+      const body = await readBody(req);
+      if (!FEATURES.includes(body.feature as Feature) || typeof body.on !== "boolean")
+        throw new HttpError(400, `Expected { feature: ${FEATURES.join(" | ")}, on: boolean }`);
+      // Traces and pipelines come from the company config; token savings stay the developer's choice.
+      if (managed() && body.feature !== "tokenSavings") throw new HttpError(403, "Rules are managed by your company.");
+      setFeature(body.feature as Feature, body.on);
+      return sendJson(res, 200, { features: features() });
+    }
+
+    if (path === "/api/stacks") {
+      if (method === "GET") {
+        const off = disabledStacks();
+        return sendJson(res, 200, { stacks: listStacks().map((name) => ({ name, on: !off.has(name) })) });
+      }
+      if (method === "PUT") {
+        const body = await readBody(req);
+        if (typeof body.name !== "string" || !listStacks().includes(body.name) || typeof body.on !== "boolean")
+          throw new HttpError(400, "Expected { name: <stack>, on: boolean }");
+        setStackEnabled(body.name, body.on);
+        return sendJson(res, 200, { ok: true });
+      }
+    }
+
+    if (path === "/api/pipelines" && method === "POST") {
+      const body = await readBody(req);
+      // Only projects the gateway has seen: the dashboard must not write into arbitrary folders.
+      if (!listProjects().some((p) => p.project === body.project)) throw new HttpError(400, "Unknown project");
+      return sendJson(res, 200, { setUp: setUpPipelines(body.project as string) });
     }
 
     throw new HttpError(404, "Not found");
@@ -541,29 +609,25 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     }
   });
 
-  const tries = options.portFallback ? 10 : 1;
-  for (let attempt = 0; attempt < tries; attempt++) {
-    try {
-      await new Promise<void>((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(port, "127.0.0.1", () => {
-          server.off("error", reject);
-          resolve();
-        });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
       });
-      break;
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== "EADDRINUSE" || attempt === tries - 1) {
-        clearInterval(pollTimer);
-        clearInterval(heartbeat);
-        throw err;
-      }
-      port++;
-    }
+    });
+  } catch (err) {
+    clearInterval(pollTimer);
+    clearInterval(heartbeat);
+    throw err;
   }
   const address = server.address();
   if (address && typeof address === "object") port = address.port;
+
+  // Uploads activity left over after the agent stopped. Rules are pulled at session start only.
+  // Every 5 minutes; no request when there is nothing to send. Never throws.
+  const syncTimer = setInterval(() => void maybeUploadActivity(), 5 * 60_000);
 
   return {
     server,
@@ -574,6 +638,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
       new Promise<void>((resolve) => {
         clearInterval(pollTimer);
         clearInterval(heartbeat);
+        clearInterval(syncTimer);
         for (const client of clients) client.end();
         clients.clear();
         server.close(() => resolve());

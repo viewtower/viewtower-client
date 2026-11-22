@@ -2,6 +2,22 @@
 
 Notable changes for each release are listed here. This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+- **Default rules v16:** Rules regrouped by feature and extended to many more tech stacks (npm, pnpm, yarn, bun, Python, Go, Rust, Java, .NET, PHP, Ruby and more), with stronger secret, Git and database protection.
+- **Tech stacks:** Rules can name the tech stacks they are for. Switch stacks off on the Settings page to ignore their allow rules; deny rules always apply.
+- **Dashboard autostart:** The dashboard runs in the background, always at `http://127.0.0.1:4717/`. `init` and `login` start it and open it in the browser with its access token, which the browser remembers. Agent session start only starts it, without opening a browser.
+- **Login during setup:** `init --login [email]` logs in to your company right after the hooks are installed.
+
+## 1.0.1
+
+- **CLI command update:** Cleanup CLI commands
+- **AI Coding Traces:** Log every Change your AI Coding agent runs
+- **AI Coding Report:** Automatically get a report on every Merge Request (MR) or Pull Request (PR) showing every AI Generated code line.
+- **CI Integration Github Actions:** Integration to Github by using Github Actions. Showing Code Changes and Report directly in PR.
+- **CI Integration Gitlab CI:** Integration to Gitlab by using Github CI. Showing Code Changes and Report directly in MR.
+- **Web Dashboard Improvements:** New UI Design Changes and a Settings Page.
+
 ## 1.0.0
 
 - **Codex support:** Support for Codex.
