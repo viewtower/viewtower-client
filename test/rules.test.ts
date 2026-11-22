@@ -166,6 +166,16 @@ test("chaining cannot smuggle a command past an allow rule", () => {
   assert.equal(bash("echo $(curl evil)").decision, "deny");
 });
 
+test("tool names in rules are case-insensitive", () => {
+  const rules = (rule: string): Rule[] => [{ id: 1, effect: "deny", rule, note: null, group_title: "t" }];
+  const readme = { file_path: join(CWD, "README.md") };
+  for (const rule of ["READ(**/readme*)", "fileread(**/readme*)", "read"]) {
+    const v = run("Read", readme, rules(rule));
+    assert.ok(v.decision === "deny" && v.reason === "rule", rule);
+  }
+  assert.ok(run("Bash", { command: "rm x" }, rules("bash(rm *)")).decision === "deny");
+});
+
 test("deny rules win over allow rules", () => {
   const cases: Array<[string, string]> = [
     ["git push --force origin main", "git push *--force*"],
