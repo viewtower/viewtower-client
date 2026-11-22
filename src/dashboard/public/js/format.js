@@ -108,10 +108,12 @@ export function callRow(c) {
           ? `${(c.durationMs / 1000).toFixed(1)}s`
           : "completed"
         : "running…";
+  // Grep/Glob summaries are "Path: …\nArg: …"; other summaries (multi-line shell commands) stay one line.
+  const lines = c.tool === "Grep" || c.tool === "Glob" ? c.summary.split("\n") : [c.summary];
   return `<tr data-id="${c.id}" class="${c._new ? "new" : ""}">
     <td class="time mono">${esc(fmtTime(c.startedAt || c.completedAt))}</td>
     <td class="tool" title="${esc(c.tool)}">${esc(toolLabel(c.tool))}${c.agentId ? ' <span class="pill" title="Called by a sub-agent">agent</span>' : ""}</td>
-    <td class="summary" title="${esc(c.summary)}">${c.description ? `<div class="call-desc">${esc(c.description)}</div>` : ""}<div class="call-cmd mono">${esc(c.summary)}</div></td>
+    <td class="summary" title="${esc(c.summary)}">${c.description ? `<div class="call-desc">${esc(c.description)}</div>` : ""}${lines.map((l) => `<div class="call-cmd mono">${esc(l)}</div>`).join("")}</td>
     <td>${tokenCell(c)}</td>
     <td title="${esc(reasonTitle(c))}">${decisionBadge(c.decision)}${reasonShort(c)}</td>
     <td class="status">${status}</td></tr>`;

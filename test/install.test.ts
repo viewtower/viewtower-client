@@ -60,7 +60,7 @@ test("--local hooks run exactly the given copy: source with tsx, build with node
   const path = tempSettings();
   installHooks({ path, localEntry: "/home/me/gw/src/main.ts" });
   const again = installHooks({ path });
-  assert.equal(again.replaced, 5);
+  assert.equal(again.replaced, 6);
   assert.equal(read(path).hooks.PreToolUse.length, 1);
   assert.equal(read(path).hooks.PreToolUse[0].hooks[0].command, hookCommand("pre", { integration: "claude" }));
 });
@@ -73,6 +73,7 @@ test("init creates settings.json when missing", () => {
   assert.equal(s.hooks.PreToolUse[0].matcher, "*");
   assert.equal(s.hooks.PreToolUse[0].hooks[0].command, hookCommand("pre", { integration: "claude" }));
   assert.equal(s.hooks.PostToolUse[0].hooks[0].command, hookCommand("post", { integration: "claude" }));
+  assert.equal(s.hooks.PostToolUseFailure[0].hooks[0].command, hookCommand("post", { integration: "claude" }));
   assert.equal(s.hooks.PreCompact[0].hooks[0].command, hookCommand("session", { integration: "claude" }));
   assert.equal(s.hooks.SessionStart[0].hooks[0].command, hookCommand("session", { integration: "claude" }));
 });
@@ -126,7 +127,7 @@ test("uninstall removes only the gateway hooks", () => {
   const path = tempSettings({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "my-linter" }] }] } });
   installHooks({ path });
   const result = uninstallHooks({ path });
-  assert.equal(result.removed, 5);
+  assert.equal(result.removed, 6);
   assert.deepEqual(read(path).hooks, { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "my-linter" }] }] });
   assert.equal(uninstallHooks({ path }).removed, 0);
 });

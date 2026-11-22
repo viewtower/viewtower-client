@@ -16,13 +16,20 @@ export async function runIntegrationHook(phase: string, integration: Integration
     reply(integration.preReply(outcome));
   } else if (phase === "post") {
     try {
-      const input = await readHookInput<{ tool_response?: unknown; duration_ms?: number }>();
+      const input = await readHookInput<{
+        hook_event_name?: string;
+        tool_response?: unknown;
+        error?: unknown;
+        duration_ms?: number;
+      }>();
+      // A failed call's output (in `error`) can't be replaced: log it unreduced, so it completes with its tokens.
+      const failed = input.hook_event_name === "PostToolUseFailure";
       const outcome = afterToolCall(
         integration.toToolCall(input),
-        { response: input.tool_response, durationMs: input.duration_ms },
-        integration.capabilities
+        { response: failed ? input.error : input.tool_response, durationMs: input.duration_ms },
+        failed ? { ...integration.capabilities, replaceOutput: false } : integration.capabilities
       );
-      reply(integration.postReply(outcome));
+      reply(failed ? undefined : integration.postReply(outcome));
     } catch (err) {
       logError("hook:post", err);
       reply();

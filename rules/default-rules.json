@@ -1,7 +1,7 @@
 {
   "$schema": "./rule-file.schema.json",
   "name": "viewtower.ai AI-Coding Governance default rules",
-  "version": 20,
+  "version": 21,
   "description": "Feature-organized developer rules for Claude Code and Codex. DENY before ALLOW; no match means deny; general is universal. V16 restores the 8 legacy shell conveniences and adds best-effort direct-command secret denies. NOT a complete security boundary: it MUST NOT be shipped as a security guarantee until OS/runtime-enforced filesystem, network, environment and subprocess isolation is required and verified. Skills, MCP, hooks and file tools also need separate controls.",
   "groups": [
     {
@@ -588,6 +588,9 @@
         {"rule": "Shell(Format-Table *)", "note": "Common local navigation, inspection or text filtering; shell-side effects require independent controls.", "techStacks": ["general"]},
         {"rule": "Shell(Format-List *)", "note": "Common local navigation, inspection or text filtering; shell-side effects require independent controls.", "techStacks": ["general"]},
         {"rule": "Shell(Out-String *)", "note": "Common local navigation, inspection or text filtering; shell-side effects require independent controls.", "techStacks": ["general"]},
+        {"rule": "Shell(Out-Null *)", "note": "Common local navigation, inspection or text filtering; shell-side effects require independent controls.", "techStacks": ["general"]},
+        {"rule": "Shell(ConvertFrom-Json *)", "note": "Common local navigation, inspection or text filtering; shell-side effects require independent controls.", "techStacks": ["general"]},
+        {"rule": "Shell(ConvertTo-Json *)", "note": "Common local navigation, inspection or text filtering; shell-side effects require independent controls.", "techStacks": ["general"]},
         {"rule": "Shell(Test-Path *)", "note": "Common local navigation, inspection or text filtering; shell-side effects require independent controls.", "techStacks": ["general"]},
         {"rule": "Shell(Get-Command *)", "note": "Common local navigation, inspection or text filtering; shell-side effects require independent controls.", "techStacks": ["general"]},
         {"rule": "Shell(cat *)", "note": "Restore v14 file inspection; path security requires sandbox-enforced denyRead, not shell pattern matching.", "techStacks": ["general"]},
@@ -868,6 +871,7 @@
         {"rule": "Shell(python -m pytest *)", "note": "Run language- or framework-specific tests.", "techStacks": ["python"]},
         {"rule": "Shell(python3 -m pytest *)", "note": "Run language- or framework-specific tests.", "techStacks": ["python"]},
         {"rule": "Shell(pytest *)", "note": "Run language- or framework-specific tests.", "techStacks": ["python"]},
+        {"rule": "Shell(poetry run pytest *)", "note": "Run language- or framework-specific tests.", "techStacks": ["poetry", "python"]},
         {"rule": "Shell(python -m unittest *)", "note": "Run language- or framework-specific tests.", "techStacks": ["python"]},
         {"rule": "Shell(python3 -m unittest *)", "note": "Run language- or framework-specific tests.", "techStacks": ["python"]},
         {"rule": "Shell(go test *)", "note": "Run language- or framework-specific tests.", "techStacks": ["go"]},
