@@ -12,6 +12,7 @@ export function installHooks(options: { path?: string } & shared.HookCommandOpti
     path: options.path ?? defaultSettingsPath(),
     integration: "claude",
     capturePrompts: true,
+    recordFailures: true,
   });
 }
 export function uninstallHooks(options: { path?: string } = {}) {

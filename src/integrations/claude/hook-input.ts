@@ -24,7 +24,7 @@ export interface ClaudeToolHookInput {
   prompt_id?: string;
   transcript_path?: string;
   cwd: string;
-  hook_event_name: "PreToolUse" | "PostToolUse";
+  hook_event_name: "PreToolUse" | "PostToolUse" | "PostToolUseFailure";
   tool_name: string;
   tool_input: unknown;
   tool_use_id: string;
@@ -54,6 +54,6 @@ export function toToolCall(input: ClaudeToolHookInput): ToolCall {
     agentId: input.agent_id,
     transcriptPath: input.transcript_path,
     // Claude's hook input has no model; only finished calls need it (for the trace).
-    model: input.hook_event_name === "PostToolUse" ? latestModel(input.transcript_path) : undefined,
+    model: input.hook_event_name !== "PreToolUse" ? latestModel(input.transcript_path) : undefined,
   };
 }

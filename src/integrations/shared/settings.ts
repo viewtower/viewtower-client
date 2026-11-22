@@ -29,7 +29,10 @@ const PHASES = [
 ] as const;
 
 type Phase = (typeof PHASES)[number]["phase"] | "prompt";
-const ALL_PHASES = [...PHASES, { event: "UserPromptSubmit", phase: "prompt" as const }];
+const PROMPT_PHASE = { event: "UserPromptSubmit", phase: "prompt" as const };
+// Claude Code fires this instead of PostToolUse when a tool fails (e.g. a non-zero exit); without it the call stays "running".
+const FAILURE_PHASE = { event: "PostToolUseFailure", phase: "post" as const };
+const ALL_PHASES = [...PHASES, PROMPT_PHASE, FAILURE_PHASE];
 
 // Package/installed commands, or the exact --local shape hookCommand writes (not any cli.js/main.js).
 const OUR_COMMAND =
@@ -125,6 +128,8 @@ export function installHooks(
     path: string;
     matcher?: string;
     capturePrompts?: boolean;
+    /** Also record failed tool calls (PostToolUseFailure; Claude Code only). */
+    recordFailures?: boolean;
     statusMessages?: Record<string, string>;
   } & HookCommandOptions & { integration: string }
 ): InstallResult {
@@ -133,7 +138,12 @@ export function installHooks(
   const replaced = removeOurHooks(settings);
   settings.hooks ??= {};
   const commands: string[] = [];
-  for (const { event, phase } of options.capturePrompts ? ALL_PHASES : PHASES) {
+  const phases = [
+    ...PHASES,
+    ...(options.capturePrompts ? [PROMPT_PHASE] : []),
+    ...(options.recordFailures ? [FAILURE_PHASE] : []),
+  ];
+  for (const { event, phase } of phases) {
     const command = hookCommand(phase, options);
     commands.push(command);
     const entries = settings.hooks[event] ?? [];

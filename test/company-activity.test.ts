@@ -45,7 +45,7 @@ beforeEach(() => {
     bodies.push(JSON.parse(String(init?.body)));
     return new Response(JSON.stringify({ accepted: 0 }), { status, headers: { "Content-Type": "application/json" } });
   }) as typeof fetch;
-  m.resetActivityCursor();
+  m.markAllActivitySynced();
 });
 
 const config = (approved: boolean, denied: boolean) =>
@@ -60,9 +60,21 @@ const config = (approved: boolean, denied: boolean) =>
   );
 
 let n = 0;
-function call(decision: "allowed" | "denied" | "would_deny") {
+const identity = (toolUseId: string) => ({
+  toolUseId,
+  sessionId: "s1",
+  project: "/p",
+  toolName: "Bash",
+  toolInput: { command: "cat .env" },
+});
+const finish = (toolUseId: string) =>
+  m.completeCall({ ...identity(toolUseId), toolResult: "secret", resultTokens: 100, resultTokensAfter: 40 });
+
+/** A logged call; allowed calls finish (with result tokens) unless `running`, denied calls never run. */
+function call(decision: "allowed" | "denied" | "would_deny", running = false) {
   const toolUseId = `t${++n}`;
-  m.insertCall({ toolUseId, sessionId: "s1", project: "/p", toolName: "Bash", toolInput: { command: "cat .env" }, decision });
+  m.insertCall({ ...identity(toolUseId), decision });
+  if (decision !== "denied" && !running) finish(toolUseId);
   return toolUseId;
 }
 
@@ -83,7 +95,8 @@ test("only opted-in decisions are sent, without tool input", async () => {
     ]
   );
   assert.ok(!JSON.stringify(bodies).includes(".env"));
-  // Cursor moved past all three: nothing is sent again.
+  assert.ok(!JSON.stringify(bodies).includes("secret"));
+  // All three marked synced: nothing is sent again.
   assert.equal(await m.uploadActivity(), 0);
   assert.equal(bodies.length, 1);
 });
@@ -98,10 +111,46 @@ test("a failed upload keeps the cursor, the next tick retries", async () => {
   assert.equal(bodies.at(-1)!.events[0].tool_use_id, id);
 });
 
+test("a running call is sent once it finishes, with its result tokens; later calls don't wait", async () => {
+  config(true, true);
+  const running = call("allowed", true);
+  const done = call("allowed");
+  const denied = call("denied");
+
+  assert.equal(await m.uploadActivity(), 2);
+  assert.deepEqual(
+    bodies[0].events.map((e) => [e.tool_use_id, e.original_result_tokens, e.actual_result_tokens]),
+    [
+      [done, 100, 40],
+      [denied, null, null],
+    ]
+  );
+
+  finish(running);
+  assert.equal(await m.uploadActivity(), 1);
+  assert.deepEqual(
+    bodies[1].events.map((e) => [e.tool_use_id, e.original_result_tokens, e.actual_result_tokens]),
+    [[running, 100, 40]]
+  );
+});
+
+test("calls logged while logged out are stored as synced", async () => {
+  config(true, true);
+  m.deleteSettings("auth:refresh_token");
+  try {
+    call("allowed");
+    call("denied");
+  } finally {
+    m.storeTokens({ access_token: "tok", refresh_token: "ref", expires_in: 3600 }, "dev@company.test");
+  }
+  assert.equal(await m.uploadActivity(), 0);
+  assert.equal(bodies.length, 0);
+});
+
 test("calls before the login are never sent", async () => {
   config(true, true);
   call("allowed");
-  m.resetActivityCursor(); // what login does
+  m.markAllActivitySynced(); // what login does
   assert.equal(await m.uploadActivity(), 0);
   assert.equal(bodies.length, 0);
 });

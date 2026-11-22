@@ -209,10 +209,10 @@ test("dashboard start makes no server request: rules are pulled at session start
 });
 
 test("maybeUploadActivity makes no request when there is nothing to send", async () => {
-  const { resetActivityCursor } = await import("../src/services/company/activity");
+  const { markAllActivitySynced } = await import("../src/services/company/activity");
   m.storeTokens({ access_token: "tok-1", refresh_token: "ref-1", expires_in: 3600 }, "dev@company.test");
   m.setSetting("company:config", JSON.stringify({ ...BUNDLE.config, sync_approved_activities: true }));
-  resetActivityCursor();
+  markAllActivitySynced();
   m.setSetting("company:last_upload", "0");
   const calls = stubFetch(() => [200, {}]);
   try {
