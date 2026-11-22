@@ -103,6 +103,12 @@ test("maybeSync does nothing within 5 minutes of the last sync", async () => {
   assert.equal(calls.length, 0);
 });
 
+test("maybeSync with force syncs even right after a sync", async () => {
+  const calls = stubFetch(() => [200, BUNDLE]);
+  await m.maybeSync(integration, true);
+  assert.ok(calls.some((c) => c.path === "/client/sync"));
+});
+
 test("an expired access token is refreshed before the sync", async () => {
   m.storeTokens({ access_token: "old", refresh_token: "ref-1", expires_in: -1 });
   const calls = stubFetch((path) =>
@@ -225,12 +231,12 @@ test("maybeUploadActivity makes no request when there is nothing to send", async
   }
 });
 
-test("a failed login keeps the previous server", async () => {
+test("a failed login throws and keeps the chosen server", async () => {
   const { login } = await import("../src/services/company/session");
   m.setSetting("server_url", "https://old.test");
   stubFetch(() => [500, { detail: "down" }]);
   await assert.rejects(login("dev@company.test", "pw", "https://typo.test"), /Server error 500/);
-  assert.equal(m.getSetting("server_url"), "https://old.test");
+  assert.equal(m.getSetting("server_url"), "https://typo.test");
 });
 
 test("logout drops tokens and company state, keeps the server", async () => {

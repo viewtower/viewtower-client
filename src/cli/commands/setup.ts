@@ -6,7 +6,8 @@ import { getDb } from "../../storage/database";
 import { integrationFor } from "../../integrations";
 import { parseArgs } from "../helper/args";
 import { logError } from "../../helpers/errors";
-import { managed } from "../../services/company/session";
+import { logout, managed } from "../../services/company/session";
+import { deleteSettings } from "../../storage/tables/settings";
 import { syncNow } from "../../services/company/sync";
 import { DASHBOARD_URL, restartDashboard } from "../../dashboard/autostart";
 import { runLogin } from "./login";
@@ -21,6 +22,9 @@ export async function runInit(args: string[]): Promise<void> {
   // --local: the hooks run this checkout's build with node (fast), also when init runs from src with tsx.
   const localEntry = flags.local ? localBuild() : undefined;
   getDb(); // create the database with the starter rules right away
+  // Every init starts fresh: no session and the default server unless --login/--server set them again.
+  logout();
+  deleteSettings("server_url");
   // Order: login (fails → nothing installed), then hooks, then dashboard.
   if (flags.login) {
     await runLogin(

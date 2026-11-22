@@ -82,14 +82,14 @@ export async function syncNow(hooksInstalled: boolean): Promise<{ version: numbe
 }
 
 /**
- * Session start only: uploads pending activity, then pulls the company rules. Runs when logged in and the
- * last attempt is 5+ minutes old. Never throws: a failed sync keeps the last rules.
+ * Session hook only: uploads pending activity, then pulls the company rules. Runs when logged in and the
+ * last attempt is 5+ minutes old, or always with `force` (agent opened). Never throws: a failed sync keeps the last rules.
  */
-export async function maybeSync(integration: Pick<Integration, "hooksInstalled">): Promise<void> {
+export async function maybeSync(integration: Pick<Integration, "hooksInstalled">, force = false): Promise<void> {
   try {
     if (!managed()) return;
     const last = Math.max(Number(getSetting("company:last_sync") ?? 0), Number(getSetting("company:last_attempt") ?? 0));
-    if (Date.now() - last < INTERVAL_MS) return;
+    if (!force && Date.now() - last < INTERVAL_MS) return;
     // Throttle on attempts too, so an unreachable server isn't asked on every prompt.
     setSetting("company:last_attempt", String(Date.now()));
     // Before syncNow: the rules replace drops the rules that pending calls matched.

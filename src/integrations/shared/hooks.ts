@@ -44,14 +44,17 @@ export async function runIntegrationHook(phase: string, integration: Integration
     await maybeUploadActivity(); // activity only (rules sync at session start); throttled, never throws
     reply();
   } else {
+    let opened = false;
     try {
       const input = await readHookInput<{ session_id?: string; hook_event_name?: string; source?: string }>();
       if (input.session_id && (input.hook_event_name === "PreCompact" || input.source === "compact" || input.source === "clear"))
         onContextReset(input.session_id);
+      // Agent opened (startup/resume, or Codex without a source): always sync, no throttle.
+      opened = input.hook_event_name === "SessionStart" && input.source !== "compact" && input.source !== "clear";
     } catch (err) {
       logError("hook:session", err);
     }
-    await maybeSync(integration);
+    await maybeSync(integration, opened);
     await ensureDashboard();
     reply();
   }
