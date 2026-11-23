@@ -35,27 +35,30 @@ export interface CodexHookInput {
   tool_response?: unknown;
   source?: string;
 }
+export function patchToolInput(command: unknown): {
+  toolName: "MultiEdit";
+  toolInput: { command: string; file_paths: string[]; deleted_paths: string[] };
+} {
+  if (typeof command !== "string") throw new Error("Missing patch command");
+  const lines = command.replace(/\r\n/g, "\n").trim().split("\n");
+  if (lines[0] !== "*** Begin Patch" || lines.at(-1) !== "*** End Patch") throw new Error("Invalid patch envelope");
+  const paths = lines.flatMap((line) => {
+    const match = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/.exec(line);
+    return match ? [match[1]] : [];
+  });
+  if (!paths.length) throw new Error("Patch contains no paths");
+  const deletedPaths = lines.flatMap((line) => {
+    const match = /^\*\*\* Delete File: (.+)$/.exec(line);
+    return match ? [match[1]] : [];
+  });
+  return { toolName: "MultiEdit", toolInput: { command, file_paths: paths, deleted_paths: deletedPaths } };
+}
 export function toToolCall(input: CodexHookInput): ToolCall {
   if (!input.session_id || !input.tool_use_id || !input.tool_name || !input.cwd) throw new Error("Incomplete Codex hook payload");
-  let toolName = input.tool_name;
-  let toolInput = input.tool_input;
-  if (toolName === "apply_patch") {
-    const command = (toolInput as { command?: unknown })?.command;
-    if (typeof command !== "string") throw new Error("Missing patch command");
-    const lines = command.replace(/\r\n/g, "\n").trim().split("\n");
-    if (lines[0] !== "*** Begin Patch" || lines.at(-1) !== "*** End Patch") throw new Error("Invalid patch envelope");
-    const paths = lines.flatMap((line) => {
-      const match = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/.exec(line);
-      return match ? [match[1]] : [];
-    });
-    if (!paths.length) throw new Error("Patch contains no paths");
-    toolName = "MultiEdit";
-    const deletedPaths = lines.flatMap((line) => {
-      const match = /^\*\*\* Delete File: (.+)$/.exec(line);
-      return match ? [match[1]] : [];
-    });
-    toolInput = { command, file_paths: paths, deleted_paths: deletedPaths };
-  }
+  const { toolName, toolInput } =
+    input.tool_name === "apply_patch"
+      ? patchToolInput((input.tool_input as { command?: unknown })?.command)
+      : { toolName: input.tool_name, toolInput: input.tool_input };
   return {
     integration: "codex",
     toolUseId: `codex:${input.session_id}:${input.tool_use_id}`,
