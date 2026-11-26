@@ -483,11 +483,20 @@ test("Codex helpers and web names have explicit defaults while shell and file re
     "wait",
     "resume_agent",
     "close_agent",
+    "send_message",
+    "followup_task",
+    "wait_agent",
+    "list_agents",
+    "SendMessage",
+    "subagent",
     "web.run",
     "web__run",
   ]) {
     assert.equal(run(name, {}).decision, "allow", name);
   }
+  // Tool names are case-insensitive: the Codex name send_message also covers the Send_Message spelling.
+  assert.equal(run("Send_Message", {}).decision, "allow");
+  assert.equal(run("Sendmessage", {}).decision, "allow");
   assert.equal(run("WebFetch", { url: "https://example.com/docs" }).decision, "allow");
   assert.equal(run("Bash", { command: "Get-Content README.md" }).decision, "allow");
   assert.equal(run("PowerShell", { command: "Get-Content README.md" }).decision, "allow");
