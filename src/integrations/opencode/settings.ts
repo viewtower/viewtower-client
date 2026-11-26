@@ -51,7 +51,7 @@ function run(phase, payload) {
     let out = "";
     let child;
     try {
-      child = spawn(COMMANDS[phase], { shell: true, stdio: ["pipe", "pipe", "ignore"] });
+      child = spawn(COMMANDS[phase], { shell: true, stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
     } catch {
       return resolve({});
     }
