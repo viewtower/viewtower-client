@@ -19,8 +19,8 @@ export const COMMANDS: Record<string, Command> = {
 };
 
 export const USAGE = [
-  "  viewtower init --agent claude|codex [--login [email]] [--dashboard] [--installed | --local] [--settings path]   (register agent hooks; --login also logs in; the dashboard starts in the background)",
-  "  viewtower uninstall --agent claude|codex [--settings path]  (remove the hooks again)",
+  "  viewtower init --agent claude|codex|opencode [--login [email]] [--dashboard] [--installed | --local] [--settings path]   (register agent hooks; --login also logs in; the dashboard starts in the background)",
+  "  viewtower uninstall --agent claude|codex|opencode [--settings path]  (remove the hooks again)",
   "  viewtower login [--email you@company.com] [--server url]   (log in to your company; rules sync automatically)",
   "  viewtower logout   (end the company login; rules become editable again)",
   "  viewtower dashboard [--port 4717] [--no-open]   (local web dashboard: activity, rules, mode, token savings)",

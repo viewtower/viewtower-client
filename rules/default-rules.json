@@ -1,7 +1,7 @@
 {
   "$schema": "./rule-file.schema.json",
   "name": "viewtower.ai AI-Coding Governance default rules",
-  "version": 21,
+  "version": 22,
   "description": "Feature-organized developer rules for Claude Code and Codex. DENY before ALLOW; no match means deny; general is universal. V16 restores the 8 legacy shell conveniences and adds best-effort direct-command secret denies. NOT a complete security boundary: it MUST NOT be shipped as a security guarantee until OS/runtime-enforced filesystem, network, environment and subprocess isolation is required and verified. Skills, MCP, hooks and file tools also need separate controls.",
   "groups": [
     {
@@ -493,7 +493,7 @@
     {
       "id": "agent-planning-and-skills",
       "title": "Agent planning, questions, skills and delegation",
-      "description": "Combine Claude Code and Codex helper tools in one feature group. Actual availability and hook coverage vary by agent/runtime.",
+      "description": "Combine Claude Code, Codex and opencode helper tools in one feature group. Actual availability and hook coverage vary by agent/runtime.",
       "allow": [
         {"rule": "TodoWrite", "note": "Create or update the task checklist.", "techStacks": ["general"]},
         {"rule": "Task", "note": "Delegate work to a Claude sub-agent.", "techStacks": ["general"]},
@@ -505,6 +505,7 @@
         {"rule": "ExitPlanMode", "note": "Finish planning and request implementation approval.", "techStacks": ["general"]},
         {"rule": "WebSearch", "note": "Search the web; only enforced when the runtime emits a hook.", "techStacks": ["general"]},
         {"rule": "ListAgents", "note": "List available or running agents.", "techStacks": ["general"]},
+        {"rule": "SendMessage", "note": "Message another Claude agent: an agent-team teammate, a resumed subagent, or another session. ListAgents and TaskStop are allowed separately.", "techStacks": ["general"]},
         {"rule": "TaskStop", "note": "stop a background task", "techStacks": ["general"]},
         {"rule": "TaskOutput", "note": "read a background task's output", "techStacks": ["general"]},
         {"rule": "BashOutput", "note": "read a background shell's output", "techStacks": ["general"]},
@@ -519,6 +520,11 @@
         {"rule": "wait", "note": "Wait for a Codex sub-agent to finish.", "techStacks": ["general"]},
         {"rule": "resume_agent", "note": "Resume a previously closed Codex sub-agent.", "techStacks": ["general"]},
         {"rule": "close_agent", "note": "Close a Codex sub-agent.", "techStacks": ["general"]},
+        {"rule": "send_message", "note": "Send a message to a Codex sub-agent (multi_agent v2); send_input is the v1 name.", "techStacks": ["general"]},
+        {"rule": "followup_task", "note": "Queue a follow-up task for a Codex sub-agent (multi_agent v2).", "techStacks": ["general"]},
+        {"rule": "wait_agent", "note": "Wait for a Codex sub-agent to finish (multi_agent v2); wait is the v1 name.", "techStacks": ["general"]},
+        {"rule": "list_agents", "note": "List Codex sub-agents (multi_agent v2); ListAgents is the Claude name.", "techStacks": ["general"]},
+        {"rule": "subagent", "note": "Start an opencode 2.x subagent; Task is the opencode 1.x name.", "techStacks": ["general"]},
         {"rule": "TaskCreate", "note": "Claude built-in task creation.", "techStacks": ["general"]},
         {"rule": "TaskGet", "note": "Claude built-in task lookup.", "techStacks": ["general"]},
         {"rule": "TaskList", "note": "Claude built-in task listing.", "techStacks": ["general"]},

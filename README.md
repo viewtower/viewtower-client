@@ -13,6 +13,7 @@
   <img src="https://img.shields.io/badge/node-%E2%89%A5%2022.13-4b8e7a" alt="Node.js 22.13 or newer">
   <img src="https://img.shields.io/badge/works%20with-Claude%20Code-4b8e7a" alt="Works with Claude Code">
   <img src="https://img.shields.io/badge/works%20with-Codex-4b8e7a" alt="Works with Codex">
+  <img src="https://img.shields.io/badge/works%20with-opencode-4b8e7a" alt="Works with opencode">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-4b8e7a" alt="GPL-3.0 license"></a>
 </p>
 
@@ -38,6 +39,7 @@ Your AI-Coding Agent codes hundreds of lines a day on your machine. Do you know 
 ```bash
 npx viewtower init --agent claude   # Claude Code
 npx viewtower init --agent codex    # Codex
+npx viewtower init --agent opencode # opencode
 ```
 
 That's it. Open the local Development Dashboard with:
@@ -105,7 +107,7 @@ npx viewtower login
 
 ### How it works
 
-viewtower installs hooks in Claude Code and Codex. With them it sees every tool call **before** it runs and every result **after** it finishes.
+viewtower installs hooks in Claude Code and Codex, and a plugin file in opencode (it has no command hooks). With them it sees every tool call **before** it runs and every result **after** it finishes.
 
 1. **Before a call:** viewtower checks it against your rules. Allowed calls continue. Denied calls are blocked, and the agent gets the reason.
 2. **After a call:** viewtower records the result and, if the agent wrote code, a trace in your project. In Claude Code, long results can be shortened before the agent reads them.
@@ -134,15 +136,17 @@ sequenceDiagram
 
 All agents share the same rules, mode, dashboard and history.
 
-| Agent           | Install                             | Hooks are written to                                              | Rules | Traces | Token savings |
-| --------------- | ----------------------------------- | ----------------------------------------------------------------- | :---: | :----: | :-----------: |
-| **Claude Code** | `npx viewtower init --agent claude` | `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`) |  ✅   |   ✅   |      ✅       |
-| **Codex**       | `npx viewtower init --agent codex`  | `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`)               |  ✅   |   ✅   |  coming soon  |
+| Agent           | Install                               | Hooks are written to                                                                            | Rules | Traces |   Token savings   |
+| --------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------- | :---: | :----: | :---------------: |
+| **Claude Code** | `npx viewtower init --agent claude`   | `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`)                               |  ✅   |   ✅   |        ✅         |
+| **Codex**       | `npx viewtower init --agent codex`    | `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`)                                             |  ✅   |   ✅   |    coming soon    |
+| **opencode**    | `npx viewtower init --agent opencode` | `~/.config/opencode/plugins/viewtower.js` (or `$XDG_CONFIG_HOME/opencode/plugins/viewtower.js`) |  ✅   |   ✅   | shell output only |
 
 Good to know:
 
 - `init` backs up your settings file first and keeps your other settings and hooks. Running it again is safe.
 - **Codex:** review and trust the new hooks in Codex before they run.
+- **opencode:** needs opencode 2.x (plugin format `{ id, setup }`). opencode loads the plugin on its next start; restart running opencode sessions.
 - New agent sessions pick up the hooks. In a running Claude Code session, confirm them with `/hooks`.
 
 To remove viewtower from an agent:
@@ -383,8 +387,8 @@ Your last synced rules stay as local rules, and you can edit them again.
 Use `npx viewtower`, or `viewtower` if you installed it globally (`npm i -g viewtower`).
 
 ```bash
-viewtower init --agent claude|codex [--login [email]]  # install the hooks (and log in)
-viewtower uninstall --agent claude|codex               # remove the hooks
+viewtower init --agent claude|codex|opencode [--login [email]]  # install the hooks (and log in)
+viewtower uninstall --agent claude|codex|opencode               # remove the hooks
 viewtower dashboard [--port 4717] [--no-open]          # open the dashboard
 viewtower dashboard --stop                             # stop the running dashboard
 viewtower report [--base <ref>] [--head <ref>] [--out <folder>]  # AI change report

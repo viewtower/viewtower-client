@@ -5,6 +5,7 @@ import { openAllowDialog } from "./allow.js";
 import { renderMarkdown } from "./markdown.js";
 
 // ---------- activity: calls and prompt groups ----------
+const agentLabel = (id) => ({ codex: "Codex", opencode: "opencode" })[id] ?? "Claude Code";
 export function addToolOption(tool) {
   if (!tool || state.tools.has(tool)) return;
   state.tools.add(tool);
@@ -157,7 +158,7 @@ export function renderGrouped() {
       <button class="pg-head" aria-expanded="${open}" aria-controls="prompt-body-${index}">
         <svg class="icon chev"><use href="#i-chevron"/></svg>
         <div class="minw0">${text}
-          <div class="pg-meta"><span>${esc(g.integration === "codex" ? "Codex" : "Claude Code")}</span><span>·</span><span>${esc(fmtTime(g.at))}</span><span>·</span><span>${esc(baseName(g.project))}</span><span>·</span>
+          <div class="pg-meta"><span>${esc(agentLabel(g.integration))}</span><span>·</span><span>${esc(fmtTime(g.at))}</span><span>·</span><span>${esc(baseName(g.project))}</span><span>·</span>
             <span>${g.callCount} tool call${g.callCount === 1 ? "" : "s"}</span>${blocked}</div></div>
       </button>
       <div class="pg-right">
@@ -242,8 +243,7 @@ $("#grouped-view").addEventListener("click", (e) => {
     if (!group?.text) return;
     promptDialogId = pid;
     $("#prompt-title").textContent = "Prompt Detail";
-    $("#prompt-meta").textContent =
-      `${group.integration === "codex" ? "Codex" : "Claude Code"} · ${fmtTime(group.at)} · ${baseName(group.project)}`;
+    $("#prompt-meta").textContent = `${agentLabel(group.integration)} · ${fmtTime(group.at)} · ${baseName(group.project)}`;
     $("#prompt-content").innerHTML = renderMarkdown(group.text);
     $("#prompt-dialog").showModal();
     $("#prompt-content").scrollTop = 0;
@@ -296,7 +296,7 @@ export async function openCall(id) {
       <dt>Decision</dt><dd>${decisionBadge(c.decision)}${reasonLong(c)}</dd>
       <dt>Started</dt><dd>${esc(fmtTime(c.startedAt))}${c.durationMs != null ? ` · took ${(c.durationMs / 1000).toFixed(2)}s` : ""}</dd>
       <dt>Project</dt><dd class="mono">${esc(c.project)}</dd>
-      <dt>Integration</dt><dd>${esc(c.integration === "codex" ? "Codex" : "Claude Code")}</dd>
+      <dt>Integration</dt><dd>${esc(agentLabel(c.integration))}</dd>
       <dt>Session</dt><dd class="mono">${esc(c.sessionId)}${c.agentId ? ` · agent ${esc(c.agentId)}` : ""}</dd>
       <dt>Tool use id</dt><dd class="mono">${esc(c.toolUseId)}</dd>
     </dl>

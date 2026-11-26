@@ -24,7 +24,7 @@ jobs:
           node-version: 22
       - name: AI change report
         # Pin a version (viewtower@1.2.3) for the same results on every run.
-        run: npx -y viewtower@1.1.0-dev.33 report --out viewtower-report
+        run: npx -y viewtower@1.1.0 report --out viewtower-report
         env:
           # Steps don't get the token automatically; the report uses it only for the check (to GitHub).
           GITHUB_TOKEN: ${{ github.token }}

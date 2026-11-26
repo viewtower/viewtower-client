@@ -77,9 +77,9 @@ export async function runUninstall(args: string[]): Promise<void> {
   const result = integration.uninstallHooks({ path });
   console.log(
     result.removed
-      ? `Removed ${result.removed} gateway hook(s) from ${result.path} (backup: ${result.backup}). Your data in the gateway folder was kept.`
+      ? `Removed ${result.removed} gateway hook(s) from ${result.path}${result.backup ? ` (backup: ${result.backup})` : ""}. Your data in the gateway folder was kept.`
       : `No gateway hooks found in ${result.path}.`
   );
   // The runtime copy is shared by all agents: remove it only when none still has hooks.
-  if (!["claude", "codex"].some((id) => integrationFor(id).hooksInstalled())) removeRuntime();
+  if (!["claude", "codex", "opencode"].some((id) => integrationFor(id).hooksInstalled())) removeRuntime();
 }
